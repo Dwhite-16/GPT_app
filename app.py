@@ -32,7 +32,41 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 
 # Sentiment models
-finbert_sentiment = pipeline("text-classification", model="ProsusAI/finbert")
+def finbert_sentiment_analysis(df, column="Headline"):
+    if df is None or column not in df.columns:
+        logging.warning("⚠️ No valid data for FinBERT sentiment analysis.")
+        return None
+
+    logging.info("🤖 Performing FinBERT sentiment analysis via Hugging Face API...")
+
+    api_url = "https://api-inference.huggingface.co/models/ProsusAI/finbert"
+    headers = {
+        "Authorization": f"Bearer {HUGGINGFACE_API_TOKEN}",
+        "Content-Type": "application/json"
+    }
+
+    sentiments = []
+    for text in df[column]:
+        payload = {
+            "inputs": text
+        }
+
+        try:
+            response = requests.post(api_url, headers=headers, json=payload)
+            response.raise_for_status()
+            result = response.json()
+
+            if isinstance(result, list) and result:
+                sentiments.append(result[0]["label"])
+            else:
+                sentiments.append("UNKNOWN")
+        except Exception as e:
+            logging.error(f"FinBERT API error for text '{text}': {e}")
+            sentiments.append("ERROR")
+
+    df["FinBERT Sentiment"] = sentiments
+    return df
+
 sia = SentimentIntensityAnalyzer()
 
 # API Keys
@@ -164,4 +198,6 @@ def finbert_sentiment_analysis(df, column="Headline"):
     return df
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 5000))  # Use dynamic port from environment variable
+    app.run(host="0.0.0.0", port=port, debug=True)  # Host to 0.0.0.0 for external access
+
