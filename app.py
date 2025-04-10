@@ -9,9 +9,7 @@ from flask_caching import Cache
 from concurrent.futures import ThreadPoolExecutor
 from newsapi import NewsApiClient
 from dotenv import load_dotenv
-import nltk
-from nltk.sentiment import SentimentIntensityAnalyzer
-from transformers import pipeline
+from textblob import TextBlob  # Importing TextBlob
 
 # Load environment variables
 load_dotenv()
@@ -32,42 +30,32 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 
 # Sentiment models
-def finbert_sentiment_analysis(df, column="Headline"):
+# Replace SentimentIntensityAnalyzer with TextBlob for sentiment analysis
+def textblob_sentiment_analysis(df, column="Headline"):
     if df is None or column not in df.columns:
-        logging.warning("⚠️ No valid data for FinBERT sentiment analysis.")
+        logging.warning("⚠️ No valid data for TextBlob sentiment analysis.")
         return None
 
-    logging.info("🤖 Performing FinBERT sentiment analysis via Hugging Face API...")
-
-    api_url = "https://api-inference.huggingface.co/models/ProsusAI/finbert"
-    headers = {
-        "Authorization": f"Bearer {HUGGINGFACE_API_TOKEN}",
-        "Content-Type": "application/json"
-    }
-
+    logging.info("📈 Performing TextBlob sentiment analysis...")
     sentiments = []
+
     for text in df[column]:
-        payload = {
-            "inputs": text
-        }
-
         try:
-            response = requests.post(api_url, headers=headers, json=payload)
-            response.raise_for_status()
-            result = response.json()
-
-            if isinstance(result, list) and result:
-                sentiments.append(result[0]["label"])
+            blob = TextBlob(str(text))
+            sentiment_score = blob.sentiment.polarity
+            if sentiment_score > 0:
+                sentiment = "Positive"
+            elif sentiment_score < 0:
+                sentiment = "Negative"
             else:
-                sentiments.append("UNKNOWN")
+                sentiment = "Neutral"
+            sentiments.append(sentiment)
         except Exception as e:
-            logging.error(f"FinBERT API error for text '{text}': {e}")
-            sentiments.append("ERROR")
+            logging.error(f"Error analyzing sentiment for text '{text}': {e}")
+            sentiments.append("Error")
 
-    df["FinBERT Sentiment"] = sentiments
+    df["TextBlob Sentiment"] = sentiments
     return df
-
-sia = SentimentIntensityAnalyzer()
 
 # API Keys
 NEWS_API_KEY = os.getenv("NEWSAPI_KEY")
@@ -115,7 +103,7 @@ def get_news():
         return jsonify({"error": "No financial news available."}), 400
 
     analyzed_news = analyze_sentiment(news_data)
-    analyzed_news = finbert_sentiment_analysis(analyzed_news)
+    analyzed_news = textblob_sentiment_analysis(analyzed_news)  # Use TextBlob for sentiment analysis
     return jsonify(analyzed_news.to_dict(orient="records"))
 
 # Ask-question route using Hugging Face
@@ -153,10 +141,10 @@ def process_question(query):
             generated_text = response.json()[0]["generated_text"]
             return generated_text.strip()
         else:
-            print(f"❌ Hugging Face API Error: {response.status_code} - {response.text}")
+            logging.error(f"❌ Hugging Face API Error: {response.status_code} - {response.text}")
             return "Sorry, Hugging Face API could not process the question."
     except Exception as e:
-        print(f"❌ Error in process_question: {e}")
+        logging.error(f"❌ Error in process_question: {e}")
         return "Sorry, something went wrong while processing your question."
 
 
@@ -189,15 +177,6 @@ def analyze_sentiment(df, column="Headline"):
     df["Vader Sentiment"] = df["Vader Sentiment Score"].apply(lambda score: "Positive" if score > 0.05 else ("Negative" if score < -0.05 else "Neutral"))
     return df
 
-def finbert_sentiment_analysis(df, column="Headline"):
-    if df is None or column not in df.columns:
-        logging.warning("⚠️ No valid data for FinBERT sentiment analysis.")
-        return None
-    logging.info("🤖 Performing FinBERT sentiment analysis...")
-    df["FinBERT Sentiment"] = df[column].apply(lambda text: finbert_sentiment(str(text))[0]["label"])
-    return df
-
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))  # Use dynamic port from environment variable
     app.run(host="0.0.0.0", port=port, debug=True)  # Host to 0.0.0.0 for external access
-
